@@ -50,10 +50,11 @@ class SheetsExporter(
             val spreadsheetId = created.spreadsheetId
 
             // 2. Prepara i dati: intestazione + righe
-            val header = listOf("Data", "Inizio", "Fine", "Ore", "Nota")
+            val header = listOf("Data", "Inizio", "Fine", "Ore", "Tipo", "Nota")
             val rows = entries.map { entry ->
                 val hours = calculateHours(entry.startTime, entry.endTime)
-                listOf(entry.date, entry.startTime, entry.endTime, String.format("%.2f", hours), entry.note)
+                val tipo = if (entry.isHoliday) "Festivo" else "Feriale"
+                listOf(entry.date, entry.startTime, entry.endTime, String.format("%.2f", hours), tipo, entry.note)
             }
             val values = listOf(header) + rows
 

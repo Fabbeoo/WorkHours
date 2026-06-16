@@ -60,13 +60,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         loadEntriesForMonth()
     }
 
-    fun addEntry(startTime: String, endTime: String, note: String = "") {
+    fun addEntry(startTime: String, endTime: String, note: String = "", isHoliday: Boolean = false) {
         viewModelScope.launch {
             val entry = WorkEntry(
                 date = _selectedDate.value.format(dateFormatter),
                 startTime = startTime,
                 endTime = endTime,
-                note = note
+                note = note,
+                isHoliday = isHoliday  // ← AGGIUNGI
             )
             repository.insert(entry)
             loadEntriesForSelectedDate()
@@ -110,11 +111,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun calculateHours(startTime: String, endTime: String): Float {
+    fun calculateHours(startTime: String, endTime: String): String {
         val (startH, startM) = startTime.split(":").map { it.toInt() }
         val (endH, endM) = endTime.split(":").map { it.toInt() }
         val startMinutes = startH * 60 + startM
         val endMinutes = endH * 60 + endM
-        return (endMinutes - startMinutes) / 60f
+        val totalMinutes = endMinutes - startMinutes
+        val hours = totalMinutes / 60
+        val minutes = totalMinutes % 60
+        return "${hours}h ${String.format("%02d", minutes)}m"
     }
 }

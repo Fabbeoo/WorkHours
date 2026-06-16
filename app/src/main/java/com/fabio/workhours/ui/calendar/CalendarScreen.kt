@@ -1,23 +1,22 @@
 package com.fabio.workhours.ui.calendar
 
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Share
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,17 +35,10 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.fabio.workhours.sheets.SheetsExporter
 import java.time.format.DateTimeFormatter as DTF
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,8 +74,7 @@ fun CalendarScreen(
     ) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
-            val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
-            // account ora contiene l'utente loggato — lo useremo per l'export
+            task.getResult(com.google.android.gms.common.api.ApiException::class.java)
         } catch (e: Exception) {
             // login fallito o annullato
         }
@@ -126,7 +117,7 @@ fun CalendarScreen(
                                     try {
                                         val exporter = SheetsExporter(context, account.email!!)
                                         val monthName = currentMonth.format(DTF.ofPattern("MMMM yyyy"))
-                                        val url = exporter.exportEntries(entriesForMonth, "WorkHours - $monthName")
+                                        exporter.exportEntries(entriesForMonth, "WorkHours - $monthName")
                                         snackbarHostState.showSnackbar("Esportato! Apri da Google Drive")
                                     } catch (e: Exception) {
                                         snackbarHostState.showSnackbar("Errore: ${e.message}")
@@ -157,12 +148,8 @@ fun CalendarScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 MonthHeader(
                     currentMonth = currentMonth,
-                    onPreviousMonth = {
-                        viewModel.changeMonth(currentMonth.minusMonths(1))
-                    },
-                    onNextMonth = {
-                        viewModel.changeMonth(currentMonth.plusMonths(1))
-                    }
+                    onPreviousMonth = { viewModel.changeMonth(currentMonth.minusMonths(1)) },
+                    onNextMonth = { viewModel.changeMonth(currentMonth.plusMonths(1)) }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 MonthlyHoursSummary(
@@ -192,8 +179,8 @@ fun CalendarScreen(
     if (showAddDialog) {
         EntryDialog(
             title = "Aggiungi turno",
-            onConfirm = { start, end, note ->
-                viewModel.addEntry(start, end, note)
+            onConfirm = { start, end, note, isHoliday ->
+                viewModel.addEntry(start, end, note, isHoliday)
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false }
@@ -206,8 +193,9 @@ fun CalendarScreen(
             initialStart = entry.startTime,
             initialEnd = entry.endTime,
             initialNote = entry.note,
-            onConfirm = { start, end, note ->
-                viewModel.updateEntry(entry.copy(startTime = start, endTime = end, note = note))
+            initialIsHoliday = entry.isHoliday,
+            onConfirm = { start, end, note, isHoliday ->
+                viewModel.updateEntry(entry.copy(startTime = start, endTime = end, note = note, isHoliday = isHoliday))
                 entryToEdit = null
             },
             onDismiss = { entryToEdit = null }
@@ -240,12 +228,25 @@ fun MonthHeader(
 @Composable
 fun MonthlyHoursSummary(
     entriesForMonth: List<WorkEntry>,
-    calculateHours: (String, String) -> Float
+    calculateHours: (String, String) -> String
 ) {
-    val totalHours = entriesForMonth.sumOf {
-        calculateHours(it.startTime, it.endTime).toDouble()
-    }.toFloat()
+    fun totalMinutes(entries: List<WorkEntry>): Int {
+        return entries.sumOf { entry ->
+            val (startH, startM) = entry.startTime.split(":").map { it.toInt() }
+            val (endH, endM) = entry.endTime.split(":").map { it.toInt() }
+            (endH * 60 + endM) - (startH * 60 + startM)
+        }
+    }
 
+    fun minutesToString(minutes: Int): String {
+        val h = minutes / 60
+        val m = minutes % 60
+        return "${h}h ${String.format("%02d", m)}m"
+    }
+
+    val totalMins = totalMinutes(entriesForMonth)
+    val holidayMins = totalMinutes(entriesForMonth.filter { it.isHoliday })
+    val weekdayMins = totalMins - holidayMins
     val daysWorked = entriesForMonth.map { it.date }.distinct().size
 
     Card(
@@ -255,42 +256,77 @@ fun MonthlyHoursSummary(
             containerColor = MaterialTheme.colorScheme.primaryContainer
         )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Text(
-                    text = "Totale ore",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    text = "${String.format("%.1f", totalHours)}h",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Totale ore",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = minutesToString(totalMins),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Giorni lavorati",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "$daysWorked",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "Giorni lavorati",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    text = "$daysWorked",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Feriali",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = minutesToString(weekdayMins),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Festivi",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = minutesToString(holidayMins),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
     }
 }
-
 @Composable
 fun CalendarGrid(
     currentMonth: LocalDate,
@@ -300,20 +336,13 @@ fun CalendarGrid(
 ) {
     val yearMonth = YearMonth.of(currentMonth.year, currentMonth.month)
     val firstDayOfMonth = yearMonth.atDay(1)
-    // Lunedì = 0, Domenica = 6
     val firstDayOfWeek = (firstDayOfMonth.dayOfWeek.value - 1)
     val daysInMonth = yearMonth.lengthOfMonth()
-
-    // Giorni che hanno almeno un turno
-    val datesWithEntries = entriesForMonth
-        .map { it.date }
-        .toSet()
-
+    val datesWithEntries = entriesForMonth.map { it.date }.toSet()
     val dayLabels = listOf("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom")
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(8.dp)) {
-            // Intestazioni giorni
             Row(modifier = Modifier.fillMaxWidth()) {
                 dayLabels.forEach { label ->
                     Text(
@@ -327,7 +356,6 @@ fun CalendarGrid(
             }
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Griglia giorni
             val totalCells = firstDayOfWeek + daysInMonth
             val rows = (totalCells + 6) / 7
 
@@ -415,12 +443,17 @@ fun DayCell(
 fun DaySummary(
     date: LocalDate,
     entries: List<WorkEntry>,
-    calculateHours: (String, String) -> Float,
+    calculateHours: (String, String) -> String,
     onEdit: (WorkEntry) -> Unit,
     onDelete: (WorkEntry) -> Unit
 ) {
     val formatter = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ITALIAN)
-    val totalHours = entries.sumOf { calculateHours(it.startTime, it.endTime).toDouble() }.toFloat()
+    val totalMinutes = entries.sumOf { entry ->
+        val (startH, startM) = entry.startTime.split(":").map { it.toInt() }
+        val (endH, endM) = entry.endTime.split(":").map { it.toInt() }
+        (endH * 60 + endM) - (startH * 60 + startM)
+    }
+    val totalStr = "${totalMinutes / 60}h ${String.format("%02d", totalMinutes % 60)}m"
 
     Column {
         Row(
@@ -433,9 +466,9 @@ fun DaySummary(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            if (totalHours > 0) {
+            if (totalMinutes > 0) {
                 Text(
-                    text = "Totale: ${String.format("%.1f", totalHours)}h",
+                    text = "Totale: $totalStr",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -463,11 +496,10 @@ fun DaySummary(
         }
     }
 }
-
 @Composable
 fun EntryCard(
     entry: WorkEntry,
-    hours: Float,
+    hours: String,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -482,13 +514,22 @@ fun EntryCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${entry.startTime} – ${entry.endTime}",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (entry.isHoliday) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "festivo",
+                            fontSize = 14.sp
+                        )
+                    }
+                }
                 Text(
-                    text = "${entry.startTime} – ${entry.endTime}",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = "${String.format("%.1f", hours)} ore",
+                    text = hours,
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -517,15 +558,17 @@ fun EntryCard(
 @Composable
 fun EntryDialog(
     title: String,
-    initialStart: String = "09:00",
-    initialEnd: String = "18:00",
+    initialStart: String = "08:00",
+    initialEnd: String = "13:00",
     initialNote: String = "",
-    onConfirm: (String, String, String) -> Unit,
+    initialIsHoliday: Boolean = false,
+    onConfirm: (String, String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var startTime by remember { mutableStateOf(initialStart) }
     var endTime by remember { mutableStateOf(initialEnd) }
     var note by remember { mutableStateOf(initialNote) }
+    var isHoliday by remember { mutableStateOf(initialIsHoliday) }
     var errorMessage by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -551,6 +594,20 @@ fun EntryDialog(
                     label = { Text("Nota (opzionale)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Checkbox(
+                        checked = isHoliday,
+                        onCheckedChange = { isHoliday = it }
+                    )
+                    Text(
+                        text = "Giorno festivo",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
                 if (errorMessage.isNotBlank()) {
                     Text(
                         text = errorMessage,
@@ -567,7 +624,7 @@ fun EntryDialog(
                     errorMessage = "Formato orario non valido (usa HH:MM)"
                     return@TextButton
                 }
-                onConfirm(startTime, endTime, note)
+                onConfirm(startTime, endTime, note, isHoliday)
             }) {
                 Text("Salva")
             }

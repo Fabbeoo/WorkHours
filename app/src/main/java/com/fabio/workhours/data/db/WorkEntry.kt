@@ -7,8 +7,9 @@ import androidx.room.PrimaryKey
 data class WorkEntry(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
-    val date: String,        // formato "2025-06-04"
-    val startTime: String,   // formato "09:00"
-    val endTime: String,     // formato "18:00"
-    val note: String = ""
+    val date: String,
+    val startTime: String,
+    val endTime: String,
+    val note: String = "",
+    val isHoliday: Boolean = false  // ← AGGIUNGI
 )
