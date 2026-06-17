@@ -339,10 +339,20 @@ fun CalendarGrid(
     val firstDayOfWeek = (firstDayOfMonth.dayOfWeek.value - 1)
     val daysInMonth = yearMonth.lengthOfMonth()
     val datesWithEntries = entriesForMonth.map { it.date }.toSet()
-    val dayLabels = listOf("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom")
+    val dayLabels = listOf("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom", "Tot")
+
+    // Calcola minuti totali per data
+    val minutesByDate = entriesForMonth.groupBy { it.date }.mapValues { (_, entries) ->
+        entries.sumOf { entry ->
+            val (startH, startM) = entry.startTime.split(":").map { it.toInt() }
+            val (endH, endM) = entry.endTime.split(":").map { it.toInt() }
+            (endH * 60 + endM) - (startH * 60 + startM)
+        }
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(8.dp)) {
+            // Intestazioni giorni + colonna Tot
             Row(modifier = Modifier.fillMaxWidth()) {
                 dayLabels.forEach { label ->
                     Text(
@@ -350,7 +360,10 @@ fun CalendarGrid(
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (label == "Tot")
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -360,7 +373,13 @@ fun CalendarGrid(
             val rows = (totalCells + 6) / 7
 
             for (row in 0 until rows) {
-                Row(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    var weekMinutes = 0
+
+                    // 7 celle dei giorni
                     for (col in 0 until 7) {
                         val cellIndex = row * 7 + col
                         val day = cellIndex - firstDayOfWeek + 1
@@ -374,6 +393,9 @@ fun CalendarGrid(
                             val isToday = date == LocalDate.now()
                             val hasEntries = datesWithEntries.contains(dateStr)
 
+                            // Accumula minuti della settimana
+                            weekMinutes += minutesByDate[dateStr] ?: 0
+
                             DayCell(
                                 day = day,
                                 isSelected = isSelected,
@@ -381,6 +403,30 @@ fun CalendarGrid(
                                 hasEntries = hasEntries,
                                 onClick = { onDateSelected(date) },
                                 modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // Colonna totale settimana
+                    val weekHours = weekMinutes / 60
+                    val weekMins = weekMinutes % 60
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (weekMinutes > 0) {
+                            Text(
+                                text = "${weekHours}h",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "${String.format("%02d", weekMins)}m",
+                                fontSize = 9.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }

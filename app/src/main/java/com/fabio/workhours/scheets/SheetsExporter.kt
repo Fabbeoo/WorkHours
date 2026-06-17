@@ -49,23 +49,50 @@ class SheetsExporter(
             val created = sheetsService.spreadsheets().create(spreadsheet).execute()
             val spreadsheetId = created.spreadsheetId
 
-            // 2. Prepara i dati: intestazione + righe
+            // 2. Calcola totali
+            fun minutesOf(entry: WorkEntry): Int {
+                val (startH, startM) = entry.startTime.split(":").map { it.toInt() }
+                val (endH, endM) = entry.endTime.split(":").map { it.toInt() }
+                return (endH * 60 + endM) - (startH * 60 + startM)
+            }
+            fun minutesToString(minutes: Int): String {
+                return "${minutes / 60}h ${String.format("%02d", minutes % 60)}m"
+            }
+
+            val totalMinutes = entries.sumOf { minutesOf(it) }
+            val holidayMinutes = entries.filter { it.isHoliday }.sumOf { minutesOf(it) }
+            val weekdayMinutes = totalMinutes - holidayMinutes
+
+            // 3. Prepara righe
             val header = listOf("Data", "Inizio", "Fine", "Ore", "Tipo", "Nota")
             val rows = entries.map { entry ->
-                val hours = calculateHours(entry.startTime, entry.endTime)
                 val tipo = if (entry.isHoliday) "Festivo" else "Feriale"
-                listOf(entry.date, entry.startTime, entry.endTime, String.format("%.2f", hours), tipo, entry.note)
+                listOf(
+                    entry.date,
+                    entry.startTime,
+                    entry.endTime,
+                    minutesToString(minutesOf(entry)),
+                    tipo,
+                    entry.note
+                )
             }
-            val values = listOf(header) + rows
 
-            // 3. Scrive i dati a partire dalla cella A1
+            // 4. Righe riepilogo finali
+            val emptyRow = listOf("", "", "", "", "", "")
+            val summaryHeader = listOf("", "", "RIEPILOGO", "", "", "")
+            val totalRow = listOf("", "", "Totale", minutesToString(totalMinutes), "", "")
+            val weekdayRow = listOf("", "", "Feriali", minutesToString(weekdayMinutes), "", "")
+            val holidayRow = listOf("", "", "Festivi", minutesToString(holidayMinutes), "", "")
+
+            val values = listOf(header) + rows + listOf(emptyRow, summaryHeader, totalRow, weekdayRow, holidayRow)
+
+            // 5. Scrive i dati
             val body = ValueRange().setValues(values)
             sheetsService.spreadsheets().values()
                 .update(spreadsheetId, "A1", body)
                 .setValueInputOption("RAW")
                 .execute()
 
-            // 4. Restituisce il link al foglio
             "https://docs.google.com/spreadsheets/d/$spreadsheetId"
         }
     }
